@@ -1,8 +1,8 @@
 const cron = require('node-cron');
 const db   = require('../config/db');
-const { fetchPolygonNews }     = require('../services/polygon');
-const { fetchCryptoPanicNews } = require('../services/cryptoPanic');
-const { fetchSECFilings }      = require('../services/secEdgar');
+const { fetchPolygonNews }   = require('../services/polygon');
+const { fetchCryptoRSSNews } = require('../services/rssNews');
+const { fetchSECFilings }    = require('../services/secEdgar');
 const { triageAlerts }         = require('../services/claude');
 const { sendPush }             = require('../services/apns');
 
@@ -53,7 +53,7 @@ async function runBreakingAlertsJob() {
 
   const [polygonEvents, cryptoEvents, secEvents] = await Promise.all([
     fetchPolygonNews(allTickers),
-    fetchCryptoPanicNews(allTickers),
+    fetchCryptoRSSNews(allTickers),
     fetchSECFilings(allTickers),
   ]);
 
