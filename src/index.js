@@ -23,6 +23,7 @@ app.use('/users',    require('./routes/users'));
 app.use('/holdings', require('./routes/holdings'));
 app.use('/alerts',   require('./routes/alerts'));
 app.use('/digest',   require('./routes/digest'));
+app.use('/api/news', require('./routes/news'));
 
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
@@ -33,9 +34,11 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOS
 
 const breakingAlerts = require('./jobs/breakingAlerts');
 const nightlyDigest  = require('./jobs/nightlyDigest');
+const newsRefresh    = require('./jobs/newsRefresh');
 
 breakingAlerts.schedule();
 nightlyDigest.schedule();
+newsRefresh.schedule();
 
 // ---------------------------------------------------------------------------
 // Start server
