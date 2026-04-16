@@ -74,6 +74,42 @@ router.patch('/:userId/:holdingId', async (req, res) => {
   }
 });
 
+// POST /holdings/:userId/sync
+// Body: { holdings: [{ ticker, name, assetType, yahooSymbol }] }
+// Bulk upserts all holdings for a user — called on app launch.
+router.post('/:userId/sync', async (req, res) => {
+  const { holdings } = req.body;
+  if (!Array.isArray(holdings)) {
+    return res.status(400).json({ error: 'holdings array required' });
+  }
+
+  try {
+    for (const h of holdings) {
+      await db.query(
+        `INSERT INTO holdings (user_id, ticker, name, asset_type, yahoo_symbol)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (user_id, ticker) DO UPDATE
+           SET name = EXCLUDED.name,
+               asset_type = EXCLUDED.asset_type,
+               yahoo_symbol = EXCLUDED.yahoo_symbol`,
+        [req.params.userId, h.ticker.toUpperCase(), h.name, h.assetType || 'stock', h.yahooSymbol || '']
+      );
+    }
+    // Remove any holdings no longer on device
+    const currentTickers = holdings.map((h) => h.ticker.toUpperCase());
+    if (currentTickers.length > 0) {
+      await db.query(
+        `DELETE FROM holdings WHERE user_id = $1 AND ticker != ALL($2::text[])`,
+        [req.params.userId, currentTickers]
+      );
+    }
+    res.json({ synced: currentTickers.length });
+  } catch (err) {
+    console.error('[holdings] sync error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // DELETE /holdings/:userId/:holdingId
 router.delete('/:userId/:holdingId', async (req, res) => {
   try {

@@ -50,6 +50,37 @@ router.post('/refresh', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/news/breaking?tickers=BTC,ETH,AAPL
+// Returns breaking articles from the last 24 hours for the given tickers.
+// ---------------------------------------------------------------------------
+router.get('/breaking', async (req, res) => {
+  const { tickers: tickerParam } = req.query;
+  if (!tickerParam) return res.status(400).json({ error: 'tickers query param required' });
+
+  const tickers = tickerParam
+    .split(',')
+    .map((t) => t.trim().toUpperCase())
+    .filter(Boolean);
+
+  const db = require('../config/db');
+  try {
+    const result = await db.query(
+      `SELECT id, tickers, headline, summary, source, article_url, published_at
+       FROM news_articles
+       WHERE is_breaking = TRUE
+         AND tickers && $1::text[]
+         AND published_at > NOW() - INTERVAL '24 hours'
+       ORDER BY published_at DESC`,
+      [tickers]
+    );
+    res.json({ articles: result.rows });
+  } catch (err) {
+    console.error('[news] breaking error:', err.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/alerts?userId=123
 // Returns alerts sent to this user in the last 7 days.
 // ---------------------------------------------------------------------------

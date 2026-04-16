@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const db   = require('../config/db');
 const { fetchPolygonNews }      = require('../services/polygon');
 const { fetchCryptoRSSNews }    = require('../services/rssNews');
-const { preFilter, claudeRelevanceFilter } = require('../services/newsFilter');
+const { preFilter, claudeRelevanceFilter, claudeBreakingCheck } = require('../services/newsFilter');
 
 const LOOKBACK_HOURS  = 24;
 const LOOKBACK_MINUTES = LOOKBACK_HOURS * 60;
@@ -56,6 +56,12 @@ async function refreshNewsForTickers(tickers) {
   const approvedArticles = await claudeRelevanceFilter(newArticles);
   for (const article of approvedArticles) {
     await storeArticle(article);
+    // Step 3b: Breaking check — is this push-worthy?
+    const isBreaking = await claudeBreakingCheck(article.ticker, article.headline, article.summary);
+    if (isBreaking) {
+      await markBreaking(article.headline);
+      console.log(`[newsRefresh] BREAKING: ${article.headline.slice(0, 60)}`);
+    }
   }
 
   // Step 4: For articles already in the DB, ensure this ticker is in their array
@@ -108,6 +114,17 @@ async function storeArticle(article) {
   }
 }
 
+async function markBreaking(headline) {
+  try {
+    await db.query(
+      `UPDATE news_articles SET is_breaking = TRUE WHERE headline = $1`,
+      [headline]
+    );
+  } catch (err) {
+    console.error('[newsRefresh] markBreaking error:', err.message);
+  }
+}
+
 async function addTickerToArticle(headline, ticker) {
   try {
     await db.query(
@@ -147,7 +164,7 @@ async function getArticlesForTickers(tickers) {
 // ---------------------------------------------------------------------------
 
 function schedule() {
-  cron.schedule('*/30 * * * *', async () => {
+  cron.schedule('*/20 * * * *', async () => {
     console.log('[newsRefresh] Cron run at', new Date().toISOString());
     try {
       const result = await db.query('SELECT DISTINCT ticker FROM holdings');
