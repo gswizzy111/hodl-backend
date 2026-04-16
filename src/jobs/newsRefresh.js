@@ -2,7 +2,7 @@ const cron = require('node-cron');
 const db   = require('../config/db');
 const { fetchPolygonNews }      = require('../services/polygon');
 const { fetchCryptoRSSNews }    = require('../services/rssNews');
-const { preFilter, claudeRelevanceCheck } = require('../services/newsFilter');
+const { preFilter, claudeRelevanceFilter } = require('../services/newsFilter');
 
 const LOOKBACK_HOURS  = 24;
 const LOOKBACK_MINUTES = LOOKBACK_HOURS * 60;
@@ -52,14 +52,10 @@ async function refreshNewsForTickers(tickers) {
   const seen         = preFiltered.filter((a) =>  headlineSet.has(a.headline));
   console.log(`[newsRefresh] ${newArticles.length} new | ${seen.length} already cached`);
 
-  // Step 3: Claude yes/no for each genuinely new article
-  for (const article of newArticles) {
-    const approved = await claudeRelevanceCheck(
-      article.ticker, article.headline, article.summary
-    );
-    if (approved) {
-      await storeArticle(article);
-    }
+  // Step 3: Claude batch relevance filter — one API call for all new articles
+  const approvedArticles = await claudeRelevanceFilter(newArticles);
+  for (const article of approvedArticles) {
+    await storeArticle(article);
   }
 
   // Step 4: For articles already in the DB, ensure this ticker is in their array

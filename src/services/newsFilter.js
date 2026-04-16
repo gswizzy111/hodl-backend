@@ -32,31 +32,68 @@ function preFilter(articles) {
 }
 
 // ---------------------------------------------------------------------------
-// Claude relevance check — yes/no only, uses Haiku for speed and cost.
+// Batch relevance check — one Claude call for up to 30 articles at once.
+// Returns the subset of articles that are relevant.
 // ---------------------------------------------------------------------------
 
-async function claudeRelevanceCheck(ticker, headline, summary) {
+async function claudeBatchRelevanceCheck(articles) {
+  if (articles.length === 0) return [];
+
+  const list = articles
+    .map((a, i) =>
+      `${i + 1}. [${a.ticker}] ${a.headline}` +
+      (a.summary ? `\n   Summary: ${a.summary.slice(0, 150)}` : '')
+    )
+    .join('\n\n');
+
   const prompt =
-    `Here is a news article about ${ticker}. Does this article contain specific factual ` +
-    `information that would directly cause a trader to buy or sell this asset — such as earnings ` +
-    `results, guidance changes, executive moves, legal rulings, regulatory decisions, major ` +
-    `partnerships, or product announcements? Ignore general market commentary, portfolio advice, ` +
-    `or articles that just mention the ticker in passing. Reply yes or no only.\n\n` +
-    `Headline: ${headline}\n` +
-    `Summary: ${summary || '(no summary)'}`;
+    `You are filtering news articles for a financial app. For each article below, decide if it ` +
+    `contains specific factual information that would directly cause a trader to buy or sell — ` +
+    `such as earnings results, guidance changes, executive moves, legal rulings, regulatory decisions, ` +
+    `major partnerships, or product announcements. Exclude general market commentary, opinion pieces, ` +
+    `portfolio advice, or articles that only mention the ticker in passing.\n\n` +
+    `Reply with ONLY a JSON array of the numbers of articles that pass, e.g. [1,3,5]. ` +
+    `If none pass, reply []. No other text.\n\n` +
+    `Articles:\n${list}`;
 
   try {
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 10,
+      max_tokens: 200,
       messages:   [{ role: 'user', content: prompt }],
     });
-    const text = (response.content[0]?.text ?? '').toLowerCase().trim();
-    return text.startsWith('yes');
+
+    const text = (response.content[0]?.text ?? '').trim();
+    const match = text.match(/\[[\d,\s]*\]/);
+    if (!match) {
+      console.warn('[newsFilter] Unexpected batch response:', text);
+      return [];
+    }
+    const indices = JSON.parse(match[0]);
+    const approved = indices
+      .filter((n) => n >= 1 && n <= articles.length)
+      .map((n) => articles[n - 1]);
+    console.log(`[newsFilter] Batch: ${approved.length}/${articles.length} approved`);
+    return approved;
   } catch (err) {
-    console.error('[newsFilter] Claude check error:', err.message);
-    return false; // fail closed — don't show unverified articles
+    console.error('[newsFilter] Batch check error:', err.message);
+    return [];
   }
+}
+
+// ---------------------------------------------------------------------------
+// Public API — filters an array of articles, batching into groups of 25.
+// ---------------------------------------------------------------------------
+
+async function claudeRelevanceFilter(articles) {
+  const BATCH_SIZE = 25;
+  const approved = [];
+  for (let i = 0; i < articles.length; i += BATCH_SIZE) {
+    const batch = articles.slice(i, i + BATCH_SIZE);
+    const result = await claudeBatchRelevanceCheck(batch);
+    approved.push(...result);
+  }
+  return approved;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,4 +123,4 @@ async function claudeBreakingCheck(ticker, headline, summary) {
   }
 }
 
-module.exports = { preFilter, claudeRelevanceCheck, claudeBreakingCheck };
+module.exports = { preFilter, claudeRelevanceFilter, claudeBreakingCheck };
