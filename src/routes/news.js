@@ -37,9 +37,11 @@ router.post('/refresh', async (req, res) => {
   }
 
   const cleaned = tickers.map((t) => t.toUpperCase());
+  console.log(`[news] POST /refresh — tickers: [${cleaned.join(', ')}]`);
 
   try {
     const articles = await refreshNewsForTickers(cleaned);
+    console.log(`[news] POST /refresh — returning ${articles.length} articles`);
     res.json({ articles });
   } catch (err) {
     console.error('[news] refresh error:', err.message);
