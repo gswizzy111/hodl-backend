@@ -58,13 +58,21 @@ async function refreshNewsForTickers(tickers) {
     await storeArticle(article);
     // Step 3b: Breaking check — is this push-worthy?
     const isBreaking = await claudeBreakingCheck(article.ticker, article.headline, article.summary);
-    if (isBreaking) {
-      await markBreaking(article.headline);
-      console.log(`[newsRefresh] BREAKING: ${article.headline.slice(0, 60)}`);
-    }
+    await markBreakingChecked(article.headline, isBreaking);
+    if (isBreaking) console.log(`[newsRefresh] BREAKING: ${article.headline.slice(0, 60)}`);
   }
 
-  // Step 4: For articles already in the DB, ensure this ticker is in their array
+  // Step 4: For articles already in the DB, ensure ticker is added + run breaking
+  //         check if not yet checked (handles articles stored before this feature existed)
+  const unchecked = await getUncheckedArticles(seen.map((a) => a.headline));
+  if (unchecked.length > 0) {
+    console.log(`[newsRefresh] Breaking-checking ${unchecked.length} previously unchecked articles`);
+    for (const row of unchecked) {
+      const isBreaking = await claudeBreakingCheck(row.tickers[0], row.headline, row.summary);
+      await markBreakingChecked(row.headline, isBreaking);
+      if (isBreaking) console.log(`[newsRefresh] BREAKING (retroactive): ${row.headline.slice(0, 60)}`);
+    }
+  }
   for (const article of seen) {
     await addTickerToArticle(article.headline, article.ticker);
   }
@@ -114,14 +122,29 @@ async function storeArticle(article) {
   }
 }
 
-async function markBreaking(headline) {
+async function markBreakingChecked(headline, isBreaking) {
   try {
     await db.query(
-      `UPDATE news_articles SET is_breaking = TRUE WHERE headline = $1`,
-      [headline]
+      `UPDATE news_articles SET is_breaking = $1, breaking_checked = TRUE WHERE headline = $2`,
+      [isBreaking, headline]
     );
   } catch (err) {
-    console.error('[newsRefresh] markBreaking error:', err.message);
+    console.error('[newsRefresh] markBreakingChecked error:', err.message);
+  }
+}
+
+async function getUncheckedArticles(headlines) {
+  if (headlines.length === 0) return [];
+  try {
+    const result = await db.query(
+      `SELECT headline, summary, tickers FROM news_articles
+       WHERE headline = ANY($1) AND breaking_checked = FALSE`,
+      [headlines]
+    );
+    return result.rows;
+  } catch (err) {
+    console.error('[newsRefresh] getUnchecked error:', err.message);
+    return [];
   }
 }
 
