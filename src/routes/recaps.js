@@ -31,14 +31,18 @@ router.get('/', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/recaps/generate  (browser-friendly trigger)
 // POST /api/recaps/generate
 // Manually triggers recap generation (useful for testing outside 8 PM).
 // ---------------------------------------------------------------------------
-router.post('/generate', async (req, res) => {
+async function handleGenerate(_req, res) {
   res.json({ message: 'Recap generation started' });
   runNightlyRecapJob().catch((err) =>
     console.error('[recaps] Manual generate error:', err.message)
   );
-});
+}
+
+router.get('/generate', handleGenerate);
+router.post('/generate', handleGenerate);
 
 module.exports = router;
