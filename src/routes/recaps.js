@@ -5,23 +5,27 @@ const { runNightlyRecapJob } = require('../jobs/nightlyRecap');
 
 // ---------------------------------------------------------------------------
 // GET /api/recaps?tickers=BTC,SOL,AAPL&date=2026-04-16
-// Returns AI-generated daily recap paragraphs for the given tickers and date.
-// Date defaults to today if omitted.
+// Always includes US_ECONOMY entry. Returns change_percent for each ticker.
 // ---------------------------------------------------------------------------
 router.get('/', async (req, res) => {
   const { tickers: tickerParam, date } = req.query;
   if (!tickerParam) return res.status(400).json({ error: 'tickers required' });
 
-  const tickers = tickerParam.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean);
+  const tickers    = tickerParam.split(',').map((t) => t.trim().toUpperCase()).filter(Boolean);
   const targetDate = date ?? new Date().toISOString().slice(0, 10);
+
+  // Always fetch US_ECONOMY alongside the requested tickers
+  const allTickers = [...new Set([...tickers, 'US_ECONOMY'])];
 
   try {
     const result = await db.query(
-      `SELECT ticker, date, summary, generated_at
+      `SELECT ticker, date, summary, change_percent, generated_at
        FROM daily_recaps
        WHERE ticker = ANY($1) AND date = $2
-       ORDER BY ticker`,
-      [tickers, targetDate]
+       ORDER BY
+         CASE WHEN ticker = 'US_ECONOMY' THEN 0 ELSE 1 END,
+         ticker`,
+      [allTickers, targetDate]
     );
     res.json({ recaps: result.rows, date: targetDate });
   } catch (err) {
@@ -33,7 +37,6 @@ router.get('/', async (req, res) => {
 // ---------------------------------------------------------------------------
 // GET /api/recaps/generate  (browser-friendly trigger)
 // POST /api/recaps/generate
-// Manually triggers recap generation (useful for testing outside 8 PM).
 // ---------------------------------------------------------------------------
 async function handleGenerate(_req, res) {
   res.json({ message: 'Recap generation started' });
