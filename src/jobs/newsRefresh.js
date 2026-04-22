@@ -2,7 +2,8 @@ const cron = require('node-cron');
 const db   = require('../config/db');
 const { fetchPolygonNews }      = require('../services/polygon');
 const { fetchCryptoRSSNews }    = require('../services/rssNews');
-const { preFilter, claudeRelevanceFilter, claudeBreakingCheck } = require('../services/newsFilter');
+const { fetchMacroNews }        = require('../services/macroNews');
+const { preFilter, claudeRelevanceFilter, claudeMacroFilter, claudeBreakingCheck } = require('../services/newsFilter');
 
 const LOOKBACK_HOURS  = 24;
 const LOOKBACK_MINUTES = LOOKBACK_HOURS * 60;
@@ -86,6 +87,28 @@ async function refreshNewsForTickers(tickers) {
   }
 
   return getArticlesForTickers(tickers);
+}
+
+// ---------------------------------------------------------------------------
+// Macro news refresh — runs alongside every per-ticker cycle
+// ---------------------------------------------------------------------------
+
+async function refreshMacroNews() {
+  console.log('[newsRefresh] Fetching macro news');
+  const raw = await fetchMacroNews(LOOKBACK_MINUTES);
+  if (raw.length === 0) { console.log('[newsRefresh] No macro articles fetched'); return; }
+
+  const headlineSet  = await getExistingHeadlines(raw.map((a) => a.headline));
+  const newArticles  = raw.filter((a) => !headlineSet.has(a.headline));
+  console.log(`[newsRefresh] Macro: ${newArticles.length} new articles to check`);
+
+  const approved = await claudeMacroFilter(newArticles);
+  for (const article of approved) {
+    await storeArticle(article);
+    const isBreaking = await claudeBreakingCheck('MACRO', article.headline, article.summary);
+    await markBreakingChecked(article.headline, isBreaking);
+    if (isBreaking) console.log(`[newsRefresh] MACRO BREAKING: ${article.headline.slice(0, 60)}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +216,7 @@ function schedule() {
       const result = await db.query('SELECT DISTINCT ticker FROM holdings');
       const tickers = result.rows.map((r) => r.ticker);
       if (tickers.length > 0) await refreshNewsForTickers(tickers);
+      await refreshMacroNews();
     } catch (err) {
       console.error('[newsRefresh] Cron error:', err.message);
     }
